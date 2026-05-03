@@ -3,6 +3,27 @@
 #include <stdexcept>
 #include <curl/curl.h>
 #include <filesystem>
+#include <random>
+#include <string>
+
+static std::string makeSpoofUserAgent() {
+    static const char chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    std::mt19937 rng(std::random_device{}());
+    std::uniform_int_distribution<int> dist(0, sizeof(chars) - 2);
+
+    std::string session_id(32, ' ');
+    for (auto& c : session_id) c = chars[dist(rng)];
+
+    std::string data =
+        "{\"os\":\"windows\","
+        "\"dtype\":\"ydisk3\","
+        "\"vsn\":\"3.2.37.4977\","
+        "\"id\":\"6BD01244C7A94456BBCEE7EEC990AEAD\","
+        "\"id2\":\"0F370CD40C594A4783BC839C846B999C\","
+        "\"session_id\":\"" + session_id + "\"}";
+
+    return "Yandex.Disk " + data;
+}
 
 HttpClient::HttpClient(const std::string& oauth_token)
     : token_(oauth_token) {}
@@ -14,6 +35,7 @@ HttpResponse HttpClient::request(const std::string &url, const std::string &meth
 
     curl_slist* headers = nullptr;
     headers = curl_slist_append(headers, ("Authorization: OAuth " + token_).c_str());
+    headers = curl_slist_append(headers, ("User-Agent: " + makeSpoofUserAgent()).c_str());
 
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
@@ -67,7 +89,11 @@ void HttpClient::uploadFileByUrl(const std::string &url, const std::string &loca
     }
     fseek(file, 0, SEEK_SET);
 
+    curl_slist* headers = nullptr;
+    headers = curl_slist_append(headers, ("User-Agent: " + makeSpoofUserAgent()).c_str());
+
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
     curl_easy_setopt(curl, CURLOPT_READDATA, file);
     curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, static_cast<curl_off_t>(filesize));
@@ -75,6 +101,7 @@ void HttpClient::uploadFileByUrl(const std::string &url, const std::string &loca
     CURLcode res = curl_easy_perform(curl);
 
     fclose(file);
+    curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK) {
@@ -99,7 +126,11 @@ void HttpClient::downloadToFile(const std::string &url, const std::string &local
         throw std::runtime_error("curl_easy_init() failed");
     }
 
+    curl_slist* headers = nullptr;
+    headers = curl_slist_append(headers, ("User-Agent: " + makeSpoofUserAgent()).c_str());
+
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, file);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, nullptr);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
@@ -107,6 +138,7 @@ void HttpClient::downloadToFile(const std::string &url, const std::string &local
     CURLcode res = curl_easy_perform(curl);
 
     fclose(file);
+    curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK) {
